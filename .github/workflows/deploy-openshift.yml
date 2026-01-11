@@ -82,7 +82,7 @@ jobs:
   deploy-to-openshift:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && secrets.OPENSHIFT_SERVER != ''
     
     steps:
       - name: Checkout code
@@ -98,7 +98,23 @@ jobs:
           OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
           OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
         run: |
-          echo "$OPENSHIFT_TOKEN" | oc login $OPENSHIFT_SERVER --token=- --insecure-skip-tls-verify=true
+          if [ -z "$OPENSHIFT_SERVER" ] || [ -z "$OPENSHIFT_TOKEN" ]; then
+            echo "⚠️  OPENSHIFT_SERVER or OPENSHIFT_TOKEN not set - skipping deployment"
+            echo "Image is available at: ghcr.io/${{ env.IMAGE_NAME }}"
+            echo "Deploy manually using: oc import-image or update deployment to use ghcr.io image"
+            exit 0
+          fi
+          
+          # Check if server is reachable (skip for local CRC)
+          if echo "$OPENSHIFT_SERVER" | grep -q "crc.testing\|localhost\|127.0.0.1"; then
+            echo "⚠️  Local OpenShift cluster detected (CRC) - GitHub Actions cannot reach it"
+            echo "✅ Image built and pushed to: ghcr.io/${{ env.IMAGE_NAME }}"
+            echo "📋 To deploy locally, run: ./deploy-openshift-local.sh"
+            echo "   Or update deployment to pull from ghcr.io"
+            exit 0
+          fi
+          
+          echo "$OPENSHIFT_TOKEN" | oc login "$OPENSHIFT_SERVER" --token=- --insecure-skip-tls-verify=true
 
       - name: Set OpenShift project
         run: |
