@@ -20,6 +20,8 @@ OPENSHIFT_PROJECT="${OPENSHIFT_PROJECT:-proplync-ai}"
 IMAGE_NAME="${IMAGE_NAME:-proplync-backend}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+CHATKIT_WORKFLOW_ID="${CHATKIT_WORKFLOW_ID:-wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448}"
+CHATKIT_API_BASE="${CHATKIT_API_BASE:-https://api.openai.com}"
 IS_LOCAL="${IS_LOCAL:-false}"
 INSECURE_SKIP_TLS="${INSECURE_SKIP_TLS:-false}"
 
@@ -67,6 +69,11 @@ check_prerequisites() {
     if [ -z "$OPENAI_API_KEY" ]; then
         print_error "OPENAI_API_KEY environment variable is required."
         exit 1
+    fi
+    
+    if [ -z "$CHATKIT_WORKFLOW_ID" ]; then
+        print_warning "CHATKIT_WORKFLOW_ID not set, using default"
+        CHATKIT_WORKFLOW_ID="wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448"
     fi
     
     print_success "Prerequisites check passed"
@@ -173,9 +180,10 @@ deploy_dockerfile() {
     
     INTERNAL_IMAGE_REF="image-registry.openshift-image-registry.svc:5000/$OPENSHIFT_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
     
-    print_info "Creating secret for OpenAI API key..."
+    print_info "Creating secret for API credentials..."
     oc create secret generic proplync-backend-secrets \
         --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY" \
+        --from-literal=CHATKIT_WORKFLOW_ID="$CHATKIT_WORKFLOW_ID" \
         --dry-run=client -o yaml | oc apply -f -
     
     print_info "Creating deployment from template..."
@@ -183,6 +191,8 @@ deploy_dockerfile() {
         -p IMAGE_NAME="$IMAGE_NAME" \
         -p IMAGE_TAG="$IMAGE_TAG" \
         -p OPENAI_API_KEY="$OPENAI_API_KEY" \
+        -p CHATKIT_WORKFLOW_ID="$CHATKIT_WORKFLOW_ID" \
+        -p CHATKIT_API_BASE="$CHATKIT_API_BASE" \
         | sed "s|image: ${IMAGE_NAME}:${IMAGE_TAG}|image: ${INTERNAL_IMAGE_REF}|g" \
         | oc apply -f -
     

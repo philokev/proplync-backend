@@ -23,11 +23,15 @@ import java.util.UUID;
 public class ChatbotResource {
 
     private static final Logger LOG = Logger.getLogger(ChatbotResource.class);
-    private static final String WORKFLOW_ID = "wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448";
-    private static final String CHATKIT_API_BASE = "https://api.openai.com";
 
     @ConfigProperty(name = "openai.api.key")
     String openaiApiKey;
+
+    @ConfigProperty(name = "chatkit.workflow.id", defaultValue = "wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448")
+    String workflowId;
+
+    @ConfigProperty(name = "chatkit.api.base", defaultValue = "https://api.openai.com")
+    String chatkitApiBase;
 
     private final HttpClient httpClient;
 
@@ -49,7 +53,14 @@ public class ChatbotResource {
         }
 
         try {
-            LOG.infof("Processing message for workflow: %s", WORKFLOW_ID);
+            if (workflowId == null || workflowId.isBlank()) {
+                LOG.error("CHATKIT_WORKFLOW_ID is not configured");
+                return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                        .entity(Map.of("error", "ChatKit workflow ID not configured"))
+                        .build();
+            }
+
+            LOG.infof("Processing message for workflow: %s", workflowId);
             LOG.infof("Session ID: %s", request.sessionId != null ? request.sessionId : "new session");
 
             // Step 1: Create or use existing ChatKit session
@@ -60,7 +71,7 @@ public class ChatbotResource {
 
             ChatbotResponse response = new ChatbotResponse();
             response.content = responseContent;
-            response.workflowId = WORKFLOW_ID;
+            response.workflowId = workflowId;
 
             return Response.ok(response).build();
 
@@ -90,11 +101,11 @@ public class ChatbotResource {
         
         String requestBody = String.format(
             "{\"workflow\":{\"id\":\"%s\"},\"user\":\"%s\"}",
-            WORKFLOW_ID, userId
+            workflowId, userId
         );
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(CHATKIT_API_BASE + "/v1/chatkit/sessions"))
+                .uri(URI.create(chatkitApiBase + "/v1/chatkit/sessions"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + openaiApiKey)
                 .header("OpenAI-Beta", "chatkit_beta=v1")
@@ -139,7 +150,7 @@ public class ChatbotResource {
         );
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(CHATKIT_API_BASE + "/v1/chatkit/messages"))
+                .uri(URI.create(chatkitApiBase + "/v1/chatkit/messages"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + clientSecret)
                 .header("OpenAI-Beta", "chatkit_beta=v1")

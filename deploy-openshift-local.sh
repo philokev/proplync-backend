@@ -20,6 +20,8 @@ OPENSHIFT_PROJECT="${OPENSHIFT_PROJECT:-proplync-ai}"
 IMAGE_NAME="${IMAGE_NAME:-proplync-backend}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+CHATKIT_WORKFLOW_ID="${CHATKIT_WORKFLOW_ID:-wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448}"
+CHATKIT_API_BASE="${CHATKIT_API_BASE:-https://api.openai.com}"
 
 # Background mode and progress options
 BACKGROUND_MODE="${BACKGROUND_MODE:-false}"
@@ -57,6 +59,8 @@ while [[ $# -gt 0 ]]; do
             echo "  OPENSHIFT_PROJECT   Project name (default: proplync-ai)"
             echo "  IMAGE_NAME          Image name (default: proplync-backend)"
             echo "  OPENAI_API_KEY      OpenAI API Key (required)"
+            echo "  CHATKIT_WORKFLOW_ID ChatKit Workflow ID (optional, has default)"
+            echo "  CHATKIT_API_BASE    ChatKit API Base URL (optional, has default)"
             exit 0
             ;;
         *)
@@ -147,6 +151,11 @@ check_prerequisites() {
         print_error "OPENAI_API_KEY environment variable is required."
         print_info "Set it with: export OPENAI_API_KEY=your-key-here"
         exit 1
+    fi
+    
+    if [ -z "$CHATKIT_WORKFLOW_ID" ]; then
+        print_warning "CHATKIT_WORKFLOW_ID not set, using default"
+        CHATKIT_WORKFLOW_ID="wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448"
     fi
     
     print_success "Prerequisites check passed"
@@ -278,9 +287,10 @@ build_and_push() {
 deploy_application() {
     INTERNAL_IMAGE_REF=$1
     
-    print_info "Creating secret for OpenAI API key..."
+    print_info "Creating secret for API credentials..."
     oc create secret generic proplync-backend-secrets \
         --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY" \
+        --from-literal=CHATKIT_WORKFLOW_ID="$CHATKIT_WORKFLOW_ID" \
         --dry-run=client -o yaml | oc apply -f -
     
     print_info "Creating deployment..."
@@ -314,6 +324,13 @@ spec:
                 secretKeyRef:
                   name: proplync-backend-secrets
                   key: OPENAI_API_KEY
+            - name: CHATKIT_WORKFLOW_ID
+              valueFrom:
+                secretKeyRef:
+                  name: proplync-backend-secrets
+                  key: CHATKIT_WORKFLOW_ID
+            - name: CHATKIT_API_BASE
+              value: "${CHATKIT_API_BASE:-https://api.openai.com}"
           resources:
             limits:
               cpu: 1000m
