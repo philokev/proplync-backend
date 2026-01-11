@@ -12,8 +12,12 @@ WORKDIR /app
 # Copy Maven files
 COPY pom.xml .
 
-# Download dependencies
-RUN mvn dependency:go-offline -B || true
+# Use help:effective-pom to force BOM resolution first
+# This populates the dependencyManagement before validation
+RUN mvn help:effective-pom -B > /dev/null 2>&1 || true
+
+# Now download dependencies - BOM should be resolved
+RUN mvn dependency:go-offline -B -U || true
 
 # Copy source code
 COPY src ./src

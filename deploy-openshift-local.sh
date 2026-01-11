@@ -325,10 +325,13 @@ build_and_push() {
     if [ "$BUILD_CMD" = "podman" ]; then
         REGISTRY_USER=$(oc whoami)
         REGISTRY_TOKEN=$(oc whoami -t)
-        echo "$REGISTRY_TOKEN" | $BUILD_CMD login -u "$REGISTRY_USER" --password-stdin "$REGISTRY" --tls-verify=false 2>/dev/null || oc registry login >&2
+        # Redirect all output to stderr to avoid polluting stdout
+        echo "$REGISTRY_TOKEN" | $BUILD_CMD login -u "$REGISTRY_USER" --password-stdin "$REGISTRY" --tls-verify=false >&2 2>&1 || oc registry login >&2 2>&1
     else
-        oc registry login >&2
+        oc registry login >&2 2>&1
     fi
+    # Clear any potential stdout output from login commands
+    true
     
     print_info "Pushing image to registry..." >&2
     if [ "$SHOW_PROGRESS" = "true" ] && [ "$BACKGROUND_MODE" = "false" ]; then
@@ -344,7 +347,8 @@ build_and_push() {
     print_success "Image pushed successfully" >&2
     
     # Output only the image reference to stdout (for command substitution)
-    echo "image-registry.openshift-image-registry.svc:5000/$OPENSHIFT_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
+    # Ensure we only output the image reference, nothing else
+    printf "image-registry.openshift-image-registry.svc:5000/%s/%s:%s\n" "$OPENSHIFT_PROJECT" "$IMAGE_NAME" "$IMAGE_TAG"
 }
 
 # Function to deploy application
@@ -363,26 +367,27 @@ deploy_application() {
     TEMP_YAML=$(mktemp)
     trap "rm -f $TEMP_YAML" EXIT
     
-    cat > "$TEMP_YAML" <<EOF
+    # Use quoted heredoc and substitute variables
+    cat > "$TEMP_YAML" <<'ENDOFYAML'
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: $IMAGE_NAME
+  name: IMAGE_NAME_PLACEHOLDER
   labels:
-    app: $IMAGE_NAME
+    app: IMAGE_NAME_PLACEHOLDER
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: $IMAGE_NAME
+      app: IMAGE_NAME_PLACEHOLDER
   template:
     metadata:
       labels:
-        app: $IMAGE_NAME
+        app: IMAGE_NAME_PLACEHOLDER
     spec:
       containers:
         - name: backend
-          image: ${INTERNAL_IMAGE_REF}
+          image: INTERNAL_IMAGE_REF_PLACEHOLDER
           ports:
             - containerPort: 8080
               protocol: TCP
@@ -398,7 +403,7 @@ spec:
                   name: proplync-backend-secrets
                   key: CHATKIT_WORKFLOW_ID
             - name: CHATKIT_API_BASE
-              value: "$CHATKIT_API_BASE"
+              value: "CHATKIT_API_BASE_PLACEHOLDER"
           resources:
             limits:
               cpu: 1000m
@@ -422,12 +427,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: $IMAGE_NAME
+  name: IMAGE_NAME_PLACEHOLDER
   labels:
-    app: $IMAGE_NAME
+    app: IMAGE_NAME_PLACEHOLDER
 spec:
   selector:
-    app: $IMAGE_NAME
+    app: IMAGE_NAME_PLACEHOLDER
   ports:
     - name: http
       port: 8080
@@ -438,22 +443,31 @@ spec:
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: $IMAGE_NAME
+  name: IMAGE_NAME_PLACEHOLDER
   labels:
-    app: $IMAGE_NAME
+    app: IMAGE_NAME_PLACEHOLDER
 spec:
   to:
     kind: Service
-    name: $IMAGE_NAME
+    name: IMAGE_NAME_PLACEHOLDER
   port:
     targetPort: http
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
-EOF
+ENDOFYAML
     
-    # Apply the YAML file
-    oc apply -f "$TEMP_YAML"
+    # Substitute variables in the YAML file using perl (handles special characters better)
+    perl -pi -e "s/IMAGE_NAME_PLACEHOLDER/$IMAGE_NAME/g" "$TEMP_YAML"
+    perl -pi -e "s|INTERNAL_IMAGE_REF_PLACEHOLDER|$INTERNAL_IMAGE_REF|g" "$TEMP_YAML"
+    perl -pi -e "s|CHATKIT_API_BASE_PLACEHOLDER|$CHATKIT_API_BASE|g" "$TEMP_YAML"
+    
+    # Debug: show the problematic line if there's an error
+    if ! oc apply -f "$TEMP_YAML" 2>&1; then
+        print_error "YAML validation failed. Checking file content..." >&2
+        sed -n '19,23p' "$TEMP_YAML" >&2
+        exit 1
+    fi
     
     print_success "Deployment created"
 }
@@ -517,7 +531,8 @@ main() {
     setup_project
     
     REGISTRY=$(setup_registry)
-    INTERNAL_IMAGE_REF=$(build_and_push "$REGISTRY")
+    # Capture only the last line (image reference) from build_and_push
+    INTERNAL_IMAGE_REF=$(build_and_push "$REGISTRY" | tail -1)
     deploy_application "$INTERNAL_IMAGE_REF"
     wait_for_deployment
     show_deployment_info
