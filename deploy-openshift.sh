@@ -85,19 +85,38 @@ check_prerequisites() {
         exit 1
     fi
     
+    # Maven is not required locally since Dockerfile builds inside container
+    # But we check for it to provide a helpful message
     if ! command_exists mvn; then
-        print_error "Maven (mvn) is not installed."
-        exit 1
+        print_info "Maven not found locally - Docker build will handle compilation"
     fi
     
+    # Load credentials from file if available
+    load_credentials
+    
+    # Validate required credentials
     if [ -z "$OPENAI_API_KEY" ]; then
-        print_error "OPENAI_API_KEY environment variable is required."
+        print_error "OPENAI_API_KEY is required but not set."
+        print_info "Set it via:"
+        print_info "  - Environment variable: export OPENAI_API_KEY=your-key"
+        print_info "  - Credentials file: Create 'credentials' file with OPENAI_API_KEY=your-key"
         exit 1
     fi
     
     if [ -z "$CHATKIT_WORKFLOW_ID" ]; then
-        print_warning "CHATKIT_WORKFLOW_ID not set, using default"
-        CHATKIT_WORKFLOW_ID="wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448"
+        print_error "CHATKIT_WORKFLOW_ID is required but not set."
+        print_info "Set it via:"
+        print_info "  - Environment variable: export CHATKIT_WORKFLOW_ID=your-workflow-id"
+        print_info "  - Credentials file: Create 'credentials' file with CHATKIT_WORKFLOW_ID=your-workflow-id"
+        exit 1
+    fi
+    
+    if [ -z "$CHATKIT_API_BASE" ]; then
+        print_error "CHATKIT_API_BASE is required but not set."
+        print_info "Set it via:"
+        print_info "  - Environment variable: export CHATKIT_API_BASE=https://api.openai.com"
+        print_info "  - Credentials file: Create 'credentials' file with CHATKIT_API_BASE=https://api.openai.com"
+        exit 1
     fi
     
     print_success "Prerequisites check passed"

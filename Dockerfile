@@ -3,22 +3,14 @@
 # Build locally first: mvn clean package -DskipTests
 
 # Stage 1: Build (optional - can be done locally)
-FROM registry.access.redhat.com/ubi9/openjdk-17:latest AS builder
+FROM maven:3.9-eclipse-temurin-17 AS builder
 
 WORKDIR /app
 
-USER root
-RUN chown -R 1001:0 /app && chmod -R 775 /app
-
-# Install Maven
-RUN microdnf install -y maven && microdnf clean all
-
-USER 1001
+# Maven is already installed in this image
 
 # Copy Maven files
 COPY pom.xml .
-COPY .mvn .mvn
-COPY mvnw* .
 
 # Download dependencies
 RUN mvn dependency:go-offline -B || true

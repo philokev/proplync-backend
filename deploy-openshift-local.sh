@@ -177,20 +177,39 @@ check_prerequisites() {
         exit 1
     fi
     
+    # Maven is not required locally since Dockerfile builds inside container
+    # But we check for it to provide a helpful message
     if ! command_exists mvn; then
-        print_error "Maven (mvn) is not installed."
-        exit 1
+        print_info "Maven not found locally - Docker build will handle compilation"
     fi
     
+    # Load credentials from file if available
+    load_credentials
+    
+    # Validate required credentials
     if [ -z "$OPENAI_API_KEY" ]; then
-        print_error "OPENAI_API_KEY environment variable is required."
-        print_info "Set it with: export OPENAI_API_KEY=your-key-here"
+        print_error "OPENAI_API_KEY is required but not set."
+        print_info "Set it via:"
+        print_info "  - Environment variable: export OPENAI_API_KEY=your-key"
+        print_info "  - Credentials file: Create 'credentials' file with OPENAI_API_KEY=your-key"
+        print_info "  - See credentials.example for format"
         exit 1
     fi
     
     if [ -z "$CHATKIT_WORKFLOW_ID" ]; then
-        print_warning "CHATKIT_WORKFLOW_ID not set, using default"
-        CHATKIT_WORKFLOW_ID="wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448"
+        print_error "CHATKIT_WORKFLOW_ID is required but not set."
+        print_info "Set it via:"
+        print_info "  - Environment variable: export CHATKIT_WORKFLOW_ID=your-workflow-id"
+        print_info "  - Credentials file: Create 'credentials' file with CHATKIT_WORKFLOW_ID=your-workflow-id"
+        exit 1
+    fi
+    
+    if [ -z "$CHATKIT_API_BASE" ]; then
+        print_error "CHATKIT_API_BASE is required but not set."
+        print_info "Set it via:"
+        print_info "  - Environment variable: export CHATKIT_API_BASE=https://api.openai.com"
+        print_info "  - Credentials file: Create 'credentials' file with CHATKIT_API_BASE=https://api.openai.com"
+        exit 1
     fi
     
     print_success "Prerequisites check passed"
@@ -238,7 +257,7 @@ setup_project() {
 
 # Function to setup registry
 setup_registry() {
-    print_info "Setting up image registry..."
+    print_info "Setting up image registry..." >&2
     
     oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{"spec":{"defaultRoute":true}}' 2>/dev/null || true
     
@@ -251,20 +270,21 @@ setup_registry() {
     fi
     
     if [ -z "$REGISTRY" ]; then
-        print_error "Could not determine registry URL"
+        print_error "Could not determine registry URL" >&2
         exit 1
     fi
     
     REGISTRY_HOST=$(echo "$REGISTRY" | cut -d: -f1)
     if ! grep -q "$REGISTRY_HOST" /etc/hosts 2>/dev/null; then
-        print_warning "Registry hostname not in /etc/hosts"
+        print_warning "Registry hostname not in /etc/hosts" >&2
         if echo "127.0.0.1 $REGISTRY_HOST" | sudo tee -a /etc/hosts >/dev/null 2>&1; then
-            print_success "Added registry to /etc/hosts"
+            print_success "Added registry to /etc/hosts" >&2
         else
-            print_warning "Could not add to /etc/hosts automatically"
+            print_warning "Could not add to /etc/hosts automatically" >&2
         fi
     fi
     
+    # Output only the registry URL to stdout (for command substitution)
     echo "$REGISTRY"
 }
 
@@ -279,42 +299,51 @@ build_and_push() {
         BUILD_CMD="docker"
     fi
     
-    print_info "Building image with $BUILD_CMD..."
+    print_info "Building image with $BUILD_CMD..." >&2
     
+    BUILD_EXIT=0
     if [ "$SHOW_PROGRESS" = "true" ] && [ "$BACKGROUND_MODE" = "false" ]; then
         $BUILD_CMD build -t "$FULL_IMAGE_NAME" -f Dockerfile . 2>&1 | while IFS= read -r line; do
-            if echo "$line" | grep -qE "(STEP|Pulling|Extracting|Building|Copying|RUN|Successfully)"; then
-                echo "  $line"
+            if echo "$line" | grep -qE "(STEP|Pulling|Extracting|Building|Copying|RUN|Successfully|Error)"; then
+                echo "  $line" >&2
             fi
         done
+        BUILD_EXIT=${PIPESTATUS[0]}
     else
         $BUILD_CMD build -t "$FULL_IMAGE_NAME" -f Dockerfile . >/dev/null 2>&1
+        BUILD_EXIT=$?
     fi
     
-    print_success "Image built successfully"
+    if [ $BUILD_EXIT -ne 0 ]; then
+        print_error "Image build failed with exit code $BUILD_EXIT" >&2
+        exit 1
+    fi
     
-    print_info "Logging in to OpenShift registry..."
+    print_success "Image built successfully" >&2
+    
+    print_info "Logging in to OpenShift registry..." >&2
     if [ "$BUILD_CMD" = "podman" ]; then
         REGISTRY_USER=$(oc whoami)
         REGISTRY_TOKEN=$(oc whoami -t)
-        echo "$REGISTRY_TOKEN" | $BUILD_CMD login -u "$REGISTRY_USER" --password-stdin "$REGISTRY" --tls-verify=false 2>/dev/null || oc registry login
+        echo "$REGISTRY_TOKEN" | $BUILD_CMD login -u "$REGISTRY_USER" --password-stdin "$REGISTRY" --tls-verify=false 2>/dev/null || oc registry login >&2
     else
-        oc registry login
+        oc registry login >&2
     fi
     
-    print_info "Pushing image to registry..."
+    print_info "Pushing image to registry..." >&2
     if [ "$SHOW_PROGRESS" = "true" ] && [ "$BACKGROUND_MODE" = "false" ]; then
         $BUILD_CMD push "$FULL_IMAGE_NAME" --tls-verify=false 2>&1 | while IFS= read -r line; do
             if echo "$line" | grep -qE "(Copying|Writing|Pushing|Storing|Done)"; then
-                echo "  $line"
+                echo "  $line" >&2
             fi
         done
     else
         $BUILD_CMD push "$FULL_IMAGE_NAME" --tls-verify=false >/dev/null 2>&1
     fi
     
-    print_success "Image pushed successfully"
+    print_success "Image pushed successfully" >&2
     
+    # Output only the image reference to stdout (for command substitution)
     echo "image-registry.openshift-image-registry.svc:5000/$OPENSHIFT_PROJECT/$IMAGE_NAME:$IMAGE_TAG"
 }
 
@@ -330,7 +359,11 @@ deploy_application() {
     
     print_info "Creating deployment..."
     
-    cat <<EOF | oc apply -f -
+    # Create temporary YAML file to avoid heredoc issues
+    TEMP_YAML=$(mktemp)
+    trap "rm -f $TEMP_YAML" EXIT
+    
+    cat > "$TEMP_YAML" <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -365,7 +398,7 @@ spec:
                   name: proplync-backend-secrets
                   key: CHATKIT_WORKFLOW_ID
             - name: CHATKIT_API_BASE
-              value: "${CHATKIT_API_BASE:-https://api.openai.com}"
+              value: "$CHATKIT_API_BASE"
           resources:
             limits:
               cpu: 1000m
@@ -418,6 +451,9 @@ spec:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
 EOF
+    
+    # Apply the YAML file
+    oc apply -f "$TEMP_YAML"
     
     print_success "Deployment created"
 }
