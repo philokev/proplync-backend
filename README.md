@@ -120,6 +120,33 @@ To add more origins, update `quarkus.http.cors.origins` in `application.properti
 
 The backend is fully configured for deployment on Red Hat OpenShift, following the same patterns as the frontend.
 
+### Deployment Options
+
+#### Option 1: GitHub Actions (Recommended) ⭐
+
+**Best for**: Production deployments, CI/CD, avoiding local environment issues
+
+The repository includes a GitHub Actions workflow that automatically builds and deploys to OpenShift when you push to `main` or `develop`.
+
+**Setup**:
+1. Add GitHub Secrets (see [.github/workflows/README.md](.github/workflows/README.md))
+2. Push to `main` or `develop` branch
+3. The workflow will automatically build and deploy
+
+**Benefits**:
+- ✅ No local podman/CRC HTTP/HTTPS issues
+- ✅ Consistent build environment
+- ✅ Automatic deployments on code changes
+- ✅ Works with any OpenShift cluster
+
+See [.github/workflows/README.md](.github/workflows/README.md) for detailed setup instructions.
+
+#### Option 2: Local Deployment Script
+
+**Best for**: Local development, testing, CRC/CodeReady Containers
+
+Use the local deployment script for quick iterations on your local OpenShift cluster. Note that local deployment may have issues with podman push to CRC registries - GitHub Actions is recommended for reliable deployments.
+
 ### Prerequisites
 
 - OpenShift CLI (`oc`) installed
