@@ -20,10 +20,13 @@ OPENSHIFT_PROJECT="${OPENSHIFT_PROJECT:-proplync-ai}"
 IMAGE_NAME="${IMAGE_NAME:-proplync-backend}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
-CHATKIT_WORKFLOW_ID="${CHATKIT_WORKFLOW_ID:-wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448}"
-CHATKIT_API_BASE="${CHATKIT_API_BASE:-https://api.openai.com}"
+CHATKIT_WORKFLOW_ID="${CHATKIT_WORKFLOW_ID:-}"
+CHATKIT_API_BASE="${CHATKIT_API_BASE:-}"
 IS_LOCAL="${IS_LOCAL:-false}"
 INSECURE_SKIP_TLS="${INSECURE_SKIP_TLS:-false}"
+
+# Credentials file path
+CREDENTIALS_FILE="${CREDENTIALS_FILE:-credentials}"
 
 # Function to print colored output
 print_info() {
@@ -45,6 +48,27 @@ print_error() {
 # Function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Function to load credentials from file
+load_credentials() {
+    if [ -f "$CREDENTIALS_FILE" ]; then
+        print_info "Loading credentials from $CREDENTIALS_FILE"
+        set -a
+        source "$CREDENTIALS_FILE"
+        set +a
+        print_success "Credentials loaded from $CREDENTIALS_FILE"
+    elif [ -f ".credentials" ]; then
+        print_info "Loading credentials from .credentials"
+        set -a
+        source ".credentials"
+        set +a
+        print_success "Credentials loaded from .credentials"
+    else
+        print_warning "No credentials file found. Using environment variables only."
+        print_info "Create a 'credentials' file or set environment variables."
+        print_info "See credentials.example for format."
+    fi
 }
 
 # Check prerequisites

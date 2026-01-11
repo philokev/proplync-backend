@@ -20,8 +20,11 @@ OPENSHIFT_PROJECT="${OPENSHIFT_PROJECT:-proplync-ai}"
 IMAGE_NAME="${IMAGE_NAME:-proplync-backend}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 OPENAI_API_KEY="${OPENAI_API_KEY:-}"
-CHATKIT_WORKFLOW_ID="${CHATKIT_WORKFLOW_ID:-wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448}"
-CHATKIT_API_BASE="${CHATKIT_API_BASE:-https://api.openai.com}"
+CHATKIT_WORKFLOW_ID="${CHATKIT_WORKFLOW_ID:-}"
+CHATKIT_API_BASE="${CHATKIT_API_BASE:-}"
+
+# Credentials file path
+CREDENTIALS_FILE="${CREDENTIALS_FILE:-credentials}"
 
 # Background mode and progress options
 BACKGROUND_MODE="${BACKGROUND_MODE:-false}"
@@ -58,9 +61,19 @@ while [[ $# -gt 0 ]]; do
             echo "  OPENSHIFT_PASSWORD   OpenShift password"
             echo "  OPENSHIFT_PROJECT   Project name (default: proplync-ai)"
             echo "  IMAGE_NAME          Image name (default: proplync-backend)"
+            echo "  CREDENTIALS_FILE    Path to credentials file (default: credentials)"
+            echo ""
+            echo "Credentials (required, can be set via environment variables or credentials file):"
             echo "  OPENAI_API_KEY      OpenAI API Key (required)"
-            echo "  CHATKIT_WORKFLOW_ID ChatKit Workflow ID (optional, has default)"
-            echo "  CHATKIT_API_BASE    ChatKit API Base URL (optional, has default)"
+            echo "  CHATKIT_WORKFLOW_ID ChatKit Workflow ID (required)"
+            echo "  CHATKIT_API_BASE    ChatKit API Base URL (required)"
+            echo ""
+            echo "The script will automatically load credentials from:"
+            echo "  1. Environment variables (highest priority)"
+            echo "  2. 'credentials' file in current directory"
+            echo "  3. '.credentials' file in current directory"
+            echo ""
+            echo "See credentials.example for credentials file format."
             exit 0
             ;;
         *)
@@ -107,6 +120,28 @@ print_error() {
 # Function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Function to load credentials from file
+load_credentials() {
+    if [ -f "$CREDENTIALS_FILE" ]; then
+        print_info "Loading credentials from $CREDENTIALS_FILE"
+        # Source the credentials file, but only export variables that are not already set
+        set -a
+        source "$CREDENTIALS_FILE"
+        set +a
+        print_success "Credentials loaded from $CREDENTIALS_FILE"
+    elif [ -f ".credentials" ]; then
+        print_info "Loading credentials from .credentials"
+        set -a
+        source ".credentials"
+        set +a
+        print_success "Credentials loaded from .credentials"
+    else
+        print_warning "No credentials file found. Using environment variables only."
+        print_info "Create a 'credentials' file or set environment variables."
+        print_info "See credentials.example for format."
+    fi
 }
 
 # Auto-detect CRC if running

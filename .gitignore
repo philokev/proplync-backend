@@ -38,3 +38,7 @@ out/
 .env
 .env.local
 *.log
+
+### Credentials files ###
+credentials
+.credentials

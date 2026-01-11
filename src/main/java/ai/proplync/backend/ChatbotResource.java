@@ -27,19 +27,32 @@ public class ChatbotResource {
     @ConfigProperty(name = "openai.api.key")
     String openaiApiKey;
 
-    @ConfigProperty(name = "chatkit.workflow.id", defaultValue = "wf_6907b12d71208190aebedcd7523c1d8d0a79856e2c61f448")
+    @ConfigProperty(name = "chatkit.workflow.id")
     String workflowId;
 
-    @ConfigProperty(name = "chatkit.api.base", defaultValue = "https://api.openai.com")
+    @ConfigProperty(name = "chatkit.api.base")
     String chatkitApiBase;
 
     private final HttpClient httpClient;
 
     @Inject
     public ChatbotResource() {
+        // Validate required configuration
+        if (openaiApiKey == null || openaiApiKey.isBlank()) {
+            throw new IllegalStateException("OPENAI_API_KEY is not configured. Set the openai.api.key property.");
+        }
+        if (workflowId == null || workflowId.isBlank()) {
+            throw new IllegalStateException("CHATKIT_WORKFLOW_ID is not configured. Set the chatkit.workflow.id property.");
+        }
+        if (chatkitApiBase == null || chatkitApiBase.isBlank()) {
+            throw new IllegalStateException("CHATKIT_API_BASE is not configured. Set the chatkit.api.base property.");
+        }
+        
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
+        
+        LOG.info("ChatbotResource initialized with workflow: " + workflowId);
     }
 
     @POST
@@ -53,13 +66,6 @@ public class ChatbotResource {
         }
 
         try {
-            if (workflowId == null || workflowId.isBlank()) {
-                LOG.error("CHATKIT_WORKFLOW_ID is not configured");
-                return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                        .entity(Map.of("error", "ChatKit workflow ID not configured"))
-                        .build();
-            }
-
             LOG.infof("Processing message for workflow: %s", workflowId);
             LOG.infof("Session ID: %s", request.sessionId != null ? request.sessionId : "new session");
 
