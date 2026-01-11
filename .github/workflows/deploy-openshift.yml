@@ -1,0 +1,192 @@
+name: Build and Deploy to OpenShift
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: proplync-backend
+  OPENSHIFT_PROJECT: proplync-ai
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: |
+          mvn clean package -DskipTests
+          ls -la target/quarkus-app/
+
+      - name: Set up Podman
+        uses: containers/podman@v1
+        with:
+          podman-version: latest
+
+      - name: Login to OpenShift
+        env:
+          OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+        run: |
+          echo "$OPENSHIFT_TOKEN" | oc login $OPENSHIFT_SERVER --token=- --insecure-skip-tls-verify=true
+
+      - name: Set OpenShift project
+        run: |
+          oc project ${{ env.OPENSHIFT_PROJECT }}
+
+      - name: Get OpenShift registry
+        id: registry
+        run: |
+          REGISTRY=$(oc get route default-route -n openshift-image-registry --template='{{ .spec.host }}' 2>/dev/null || oc registry info)
+          echo "registry=$REGISTRY" >> $GITHUB_OUTPUT
+          echo "Registry: $REGISTRY"
+
+      - name: Login to OpenShift registry
+        run: |
+          REGISTRY_USER=$(oc whoami)
+          REGISTRY_TOKEN=$(oc whoami -t)
+          echo "$REGISTRY_TOKEN" | podman login -u "$REGISTRY_USER" --password-stdin "${{ steps.registry.outputs.registry }}" --tls-verify=false
+
+      - name: Build container image
+        run: |
+          FULL_IMAGE="${{ steps.registry.outputs.registry }}/${{ env.OPENSHIFT_PROJECT }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          podman build -t "$FULL_IMAGE" -f Dockerfile .
+          echo "IMAGE_REF=$FULL_IMAGE" >> $GITHUB_ENV
+
+      - name: Push image to registry
+        run: |
+          podman push "${{ env.IMAGE_REF }}" --tls-verify=false
+
+      - name: Create or update secret
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CHATKIT_WORKFLOW_ID: ${{ secrets.CHATKIT_WORKFLOW_ID }}
+        run: |
+          oc create secret generic proplync-backend-secrets \
+            --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY" \
+            --from-literal=CHATKIT_WORKFLOW_ID="$CHATKIT_WORKFLOW_ID" \
+            --dry-run=client -o yaml | oc apply -f -
+
+      - name: Deploy to OpenShift
+        env:
+          CHATKIT_API_BASE: ${{ secrets.CHATKIT_API_BASE || 'https://api.openai.com' }}
+        run: |
+          INTERNAL_IMAGE_REF="image-registry.openshift-image-registry.svc:5000/${{ env.OPENSHIFT_PROJECT }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          
+          cat <<EOF | oc apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: ${{ env.IMAGE_NAME }}
+            labels:
+              app: ${{ env.IMAGE_NAME }}
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: ${{ env.IMAGE_NAME }}
+            template:
+              metadata:
+                labels:
+                  app: ${{ env.IMAGE_NAME }}
+              spec:
+                containers:
+                  - name: backend
+                    image: ${INTERNAL_IMAGE_REF}
+                    ports:
+                      - containerPort: 8080
+                        protocol: TCP
+                    env:
+                      - name: OPENAI_API_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: proplync-backend-secrets
+                            key: OPENAI_API_KEY
+                      - name: CHATKIT_WORKFLOW_ID
+                        valueFrom:
+                          secretKeyRef:
+                            name: proplync-backend-secrets
+                            key: CHATKIT_WORKFLOW_ID
+                      - name: CHATKIT_API_BASE
+                        value: "${{ env.CHATKIT_API_BASE }}"
+                    resources:
+                      limits:
+                        cpu: 1000m
+                        memory: 1Gi
+                      requests:
+                        cpu: 200m
+                        memory: 512Mi
+                    livenessProbe:
+                      httpGet:
+                        path: /q/health/live
+                        port: 8080
+                      initialDelaySeconds: 60
+                      periodSeconds: 10
+                    readinessProbe:
+                      httpGet:
+                        path: /q/health/ready
+                        port: 8080
+                      initialDelaySeconds: 30
+                      periodSeconds: 5
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: ${{ env.IMAGE_NAME }}
+            labels:
+              app: ${{ env.IMAGE_NAME }}
+          spec:
+            selector:
+              app: ${{ env.IMAGE_NAME }}
+            ports:
+              - name: http
+                port: 8080
+                targetPort: 8080
+                protocol: TCP
+            type: ClusterIP
+          ---
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+            name: ${{ env.IMAGE_NAME }}
+            labels:
+              app: ${{ env.IMAGE_NAME }}
+          spec:
+            to:
+              kind: Service
+              name: ${{ env.IMAGE_NAME }}
+            port:
+              targetPort: http
+            tls:
+              termination: edge
+              insecureEdgeTerminationPolicy: Redirect
+          EOF
+
+      - name: Wait for deployment
+        run: |
+          oc rollout status deployment/${{ env.IMAGE_NAME }} --timeout=5m
+
+      - name: Get route URL
+        run: |
+          ROUTE=$(oc get route ${{ env.IMAGE_NAME }} -o jsonpath='{.spec.host}')
+          echo "🚀 Backend deployed at: https://$ROUTE"
+          echo "Health check: https://$ROUTE/q/health"
