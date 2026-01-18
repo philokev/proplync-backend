@@ -1,5 +1,6 @@
 package ai.proplync.backend;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -37,7 +38,14 @@ public class ChatbotResource {
 
     @Inject
     public ChatbotResource() {
-        // Validate required configuration
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(30))
+                .build();
+    }
+
+    @PostConstruct
+    void validateConfiguration() {
+        // Validate required configuration after injection
         if (openaiApiKey == null || openaiApiKey.isBlank()) {
             throw new IllegalStateException("OPENAI_API_KEY is not configured. Set the openai.api.key property.");
         }
@@ -47,10 +55,6 @@ public class ChatbotResource {
         if (chatkitApiBase == null || chatkitApiBase.isBlank()) {
             throw new IllegalStateException("CHATKIT_API_BASE is not configured. Set the chatkit.api.base property.");
         }
-        
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
-                .build();
         
         LOG.info("ChatbotResource initialized with workflow: " + workflowId);
     }
