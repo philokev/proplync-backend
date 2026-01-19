@@ -118,7 +118,13 @@ To add more origins, update `quarkus.http.cors.origins` in `application.properti
 
 ## OpenShift Deployment
 
-The backend is fully configured for deployment on Red Hat OpenShift, following the same patterns as the frontend.
+The backend is fully configured for deployment on Red Hat OpenShift. The recommended
+path is to use the centralized `proplync-deployments` repo and kustomize overlays.
+
+```bash
+cd ../proplync-deployments
+./scripts/deploy-kustomize.sh dev backend
+```
 
 ### Deployment Options
 
@@ -141,11 +147,11 @@ The repository includes a GitHub Actions workflow that automatically builds and 
 
 See [.github/workflows/README.md](.github/workflows/README.md) for detailed setup instructions.
 
-#### Option 2: Local Deployment Script
+#### Option 2: Local Deployment Script (Legacy)
 
 **Best for**: Local development, testing, CRC/CodeReady Containers
 
-Use the local deployment script for quick iterations on your local OpenShift cluster. Note that local deployment may have issues with podman push to CRC registries - GitHub Actions is recommended for reliable deployments.
+Use the local deployment script for quick iterations on your local OpenShift cluster. Note that local deployment may have issues with podman push to CRC registries and is now considered legacy; the recommended approach is `proplync-deployments` with kustomize overlays.
 
 ### Prerequisites
 
